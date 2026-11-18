@@ -36,7 +36,8 @@ jobs:
           GH_TOKEN: ${{ secrets.FORK_SYNC_TOKEN }}
           OWNER: ${{ github.repository_owner }}
         run: |
-          set -uo pipefail
+          # Not -e: failed API calls (404s for gone upstreams, etc.) are handled below.
+          set +e -uo pipefail
           if [ -z "$GH_TOKEN" ]; then
             echo "::error::The FORK_SYNC_TOKEN secret is not set."
             exit 1
