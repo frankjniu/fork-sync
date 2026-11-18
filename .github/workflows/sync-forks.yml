@@ -118,13 +118,14 @@ jobs:
           repository: ${{ matrix.fork }}
           ref: ${{ matrix.branch }}
           token: ${{ secrets.FORK_SYNC_TOKEN }}
-          fetch-depth: 0
-          filter: blob:none # full history, file contents fetched only as needed
 
-      - name: Sync-Fork-action
-        uses: XueMoMo/Sync-Fork-action@v1.0.6
+      - name: Sync with upstream
+        uses: aormsby/Fork-Sync-With-Upstream-action@v3.4.3
         with:
-          upstream_repository: ${{ matrix.upstream }}
-          upstream_branch: ${{ matrix.upstream_branch }}
-          target_branch: ${{ matrix.branch }}
-          github_token: ${{ secrets.FORK_SYNC_TOKEN }}
+          upstream_sync_repo: ${{ matrix.upstream }}
+          upstream_sync_branch: ${{ matrix.upstream_branch }}
+          target_sync_branch: ${{ matrix.branch }}
+          # Leave empty. If set, the action pushes to this workflow's own repo
+          # (fork-sync) instead of the fork. Empty = push to the fork using the
+          # token from the checkout step.
+          target_repo_token: ''

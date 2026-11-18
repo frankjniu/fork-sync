@@ -5,7 +5,7 @@ Keeps my GitHub forks up to date with their upstream repos.
 [`sync-forks.yml`](.github/workflows/sync-forks.yml) runs every hour:
 
 1. **Find**: lists every fork on the account and checks each one against its upstream with the GitHub API. Nothing is cloned in this step.
-2. **Sync**: for each fork that's behind, checks it out and runs [`XueMoMo/Sync-Fork-action@v1.0.6`](https://github.com/marketplace/actions/sync-fork-action), which pulls from upstream and pushes to the fork's default branch.
+2. **Sync**: for each fork that's behind, checks it out and runs [`aormsby/Fork-Sync-With-Upstream-action@v3.4.3`](https://github.com/aormsby/Fork-Sync-With-Upstream-action), which pulls from upstream and pushes to the fork's default branch.
 
 New forks are picked up automatically. Each run's summary lists which forks were synced and which were skipped.
 
