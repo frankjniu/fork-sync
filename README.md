@@ -7,6 +7,8 @@ Keeps my GitHub forks up to date with their upstream repos.
 1. **Find**: lists every fork on the account and checks each one against its upstream with the GitHub API. Nothing is cloned in this step.
 2. **Sync**: for each fork that's behind, checks it out and runs [`aormsby/Fork-Sync-With-Upstream-action@v3.4.3`](https://github.com/aormsby/Fork-Sync-With-Upstream-action), which pulls from upstream and pushes to the fork's default branch.
 
+Before pushing, the sync job turns off GitHub Actions on the fork. Otherwise each sync would run upstream's CI in the fork, which fails without upstream's secrets and uses up Actions slots. Excluded forks are never touched.
+
 New forks are picked up automatically. Each run's summary lists which forks were synced and which were skipped.
 
 ## Excluding a fork
@@ -15,8 +17,10 @@ Add the repo name to `EXCLUDE` at the top of the workflow (names separated by sp
 
 ```yaml
 env:
-  EXCLUDE: ogre-battle-64-recomp-windows
+  EXCLUDE: ogre-battle-64-recomp-windows claw-code
 ```
+
+`claw-code` is excluded because GitHub has disabled git access to it ("Repository is disabled").
 
 ## What gets skipped
 

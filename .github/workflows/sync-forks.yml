@@ -13,7 +13,7 @@ permissions: {}
 
 env:
   # Forks to leave alone: repo names, separated by spaces.
-  EXCLUDE: ogre-battle-64-recomp-windows
+  EXCLUDE: ogre-battle-64-recomp-windows claw-code
 
 jobs:
   find:
@@ -112,6 +112,14 @@ jobs:
       matrix:
         include: ${{ fromJSON(needs.find.outputs.matrix) }}
     steps:
+      # Otherwise the sync push runs the fork's own CI (upstream's workflows),
+      # which fails without upstream's secrets and ties up Actions slots.
+      - name: Turn off Actions on the fork
+        env:
+          GH_TOKEN: ${{ secrets.FORK_SYNC_TOKEN }}
+          FORK: ${{ matrix.fork }}
+        run: gh api -X PUT "repos/$FORK/actions/permissions" -F enabled=false
+
       - name: Check out fork
         uses: actions/checkout@v7
         with:
