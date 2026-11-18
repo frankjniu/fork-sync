@@ -1,0 +1,129 @@
+name: Sync forks
+
+on:
+  schedule:
+    - cron: '17 * * * *' # every hour
+  workflow_dispatch:
+
+concurrency:
+  group: sync-forks
+  cancel-in-progress: false
+
+permissions: {}
+
+env:
+  # Forks to leave alone: repo names, separated by spaces.
+  EXCLUDE: ogre-battle-64-recomp-windows
+
+jobs:
+  find:
+    name: Find forks behind upstream
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.find.outputs.matrix }}
+    steps:
+      # GitHub turns off schedules in repos with no activity for 60 days.
+      # Re-enabling the workflow on every run resets that clock.
+      - name: Keep the schedule enabled
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ secrets.FORK_SYNC_TOKEN }}
+        run: gh api -X PUT "repos/${{ github.repository }}/actions/workflows/sync-forks.yml/enable"
+
+      - name: Compare each fork with its upstream
+        id: find
+        env:
+          GH_TOKEN: ${{ secrets.FORK_SYNC_TOKEN }}
+          OWNER: ${{ github.repository_owner }}
+        run: |
+          set -uo pipefail
+          if [ -z "$GH_TOKEN" ]; then
+            echo "::error::The FORK_SYNC_TOKEN secret is not set."
+            exit 1
+          fi
+
+          gh repo list "$OWNER" --fork --limit 1000 \
+            --json name,nameWithOwner,isArchived,defaultBranchRef \
+            --jq '.[] | [.name, .nameWithOwner, .isArchived, (.defaultBranchRef.name // "")] | @tsv' \
+            > forks.tsv || exit 1
+
+          : > todo.jsonl
+          : > report.md
+          uptodate=0
+          note() { printf '| %s | %s |\n' "$1" "$(printf '%s' "$2" | tr '|\n' '/ ' | cut -c1-200)" >> report.md; }
+
+          while IFS=$'\t' read -r name fork archived branch; do
+            if [[ " $EXCLUDE " == *" $name "* ]]; then note "$fork" "excluded"; continue; fi
+            if [[ "$archived" == "true" ]]; then note "$fork" "archived, skipped"; continue; fi
+            if [[ -z "$branch" ]]; then note "$fork" "empty repo, skipped"; continue; fi
+
+            parent=$(gh api "repos/$fork" --jq '.parent // empty | "\(.full_name) \(.default_branch)"' 2>/dev/null)
+            if [[ -z "$parent" ]]; then note "$fork" "upstream is gone or private, skipped"; continue; fi
+            read -r upstream upstream_default <<< "$parent"
+
+            # Sync from the upstream branch with the same name, else upstream's default branch.
+            upstream_branch=$branch
+            if ! gh api "repos/$upstream/branches/$branch" --silent 2>/dev/null; then
+              upstream_branch=$upstream_default
+            fi
+
+            # ahead_by = commits on upstream that the fork doesn't have yet.
+            out=$(gh api "repos/$fork/compare/$branch...${upstream%%/*}:$upstream_branch" --jq .ahead_by 2>&1)
+            if [[ "$out" =~ ^[0-9]+$ ]]; then
+              if (( out > 0 )); then
+                jq -nc --arg fork "$fork" --arg branch "$branch" --arg upstream "$upstream" \
+                  --arg upstream_branch "$upstream_branch" --argjson behind "$out" \
+                  '{fork: $fork, branch: $branch, upstream: $upstream, upstream_branch: $upstream_branch, behind: $behind}' >> todo.jsonl
+                note "$fork" "$out commits behind $upstream:$upstream_branch, syncing"
+              else
+                uptodate=$((uptodate + 1))
+              fi
+            elif [[ "$out" == *"No common ancestor"* ]]; then
+              note "$fork" "no shared history with $upstream (upstream rewrote its history), skipped"
+            elif [[ "$out" == *"Not Found"* ]]; then
+              note "$fork" "upstream $upstream is deleted or private, skipped"
+            else
+              note "$fork" "compare failed: $out"
+            fi
+          done < forks.tsv
+
+          echo "matrix=$(jq -sc '.[:256]' todo.jsonl)" >> "$GITHUB_OUTPUT"
+          {
+            echo "### Fork sync check"
+            echo "$(wc -l < todo.jsonl) to sync, $uptodate already up to date, $(wc -l < forks.tsv) forks total."
+            if [ -s report.md ]; then
+              echo
+              echo "| Fork | Status |"
+              echo "|---|---|"
+              sort report.md
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  sync:
+    name: ${{ matrix.fork }}
+    needs: find
+    if: needs.find.outputs.matrix != '[]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      max-parallel: 20
+      matrix:
+        include: ${{ fromJSON(needs.find.outputs.matrix) }}
+    steps:
+      - name: Check out fork
+        uses: actions/checkout@v7
+        with:
+          repository: ${{ matrix.fork }}
+          ref: ${{ matrix.branch }}
+          token: ${{ secrets.FORK_SYNC_TOKEN }}
+          fetch-depth: 0
+          filter: blob:none # full history, file contents fetched only as needed
+
+      - name: Sync-Fork-action
+        uses: XueMoMo/Sync-Fork-action@v1.0.6
+        with:
+          upstream_repository: ${{ matrix.upstream }}
+          upstream_branch: ${{ matrix.upstream_branch }}
+          target_branch: ${{ matrix.branch }}
+          github_token: ${{ secrets.FORK_SYNC_TOKEN }}
